@@ -1,5 +1,7 @@
 #include "twihtl.h"
 #include "ringbuffer.h"
+#include <avr/io.h>
+#include <util/twi.h>
 #include <stdlib.h>
 
 unsigned char i2c_presacler_values[] = {1, 4, 16, 64};
@@ -50,6 +52,40 @@ bool_t i2c_init(unsigned long a_bitrate, unsigned long a_scl, unsigned char a_wr
 	return TRUE_E;
 }
 
+bool_t i2c_write(unsigned char a_sla, unsigned char *a_buffer, unsigned char a_size)
+{
+	if(i2c.cur_state != I2C_STATE_TRANSFER_FINISHED && 
+		i2c.cur_state != I2C_STATE_IDLE &&
+		i2c.cur_state != I2C_STATE_ERROR)
+	{
+		return FALSE_E;
+	}
+
+	for (unsigned char i = 0; i < a_size; i++)
+	{
+		if (!ringbuffer_write(i2c.write_buffer, a_buffer[i]))	
+		{
+			return FALSE_E;
+		}
+	}
+	i2c.slave_address = a_sla;
+	i2c.cmd = I2C_CMD_WRITE;
+	i2c_start();
+	return TRUE_E;
+}
+
+bool_t i2c_read(unsigned char a_sla, unsigned char *a_buffer, unsigned char a_size)
+{
+	if(i2c.cur_state != I2C_STATE_TRANSFER_FINISHED && 
+		i2c.cur_state != I2C_STATE_IDLE &&
+		i2c.cur_state != I2C_STATE_ERROR)
+	{
+		return FALSE_E;
+	}
+	i2c.cmd = I2C_CMD_READ;
+	/*...*/
+}
+
 static void i2c_start(void)
 {
 	i2c.cur_state = I2C_STATE_START;
@@ -71,7 +107,7 @@ static void i2c_send_sla_w(void)
 static void i2c_send_sla_r(void)
 {
 	i2c.cur_state = I2C_STATE_ADDRESS_READ;
-	TWDR = i2c.slave_address | 0x01;				// se LSB for READ
+	TWDR = i2c.slave_address | 0x01;				// set LSB for READ
 	TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWIE) // TWIE is enabled
 }
 
@@ -102,9 +138,46 @@ ISR(TWI_vect)
 		if (i2c_status != TW_START && i2c_status != TW_REP_START)
 		{
 			i2c_stop();
+			i2c.cur_state = I2C_STATE_ERROR;
+			break;
 		}
+		if (i2c.cmd /*...*/)
+		{
+			/*...*/
+		}
+		/*...*/
 		break;
 
+	case I2C_STATE_ADDRESS_WRITE:
+		if(i2c_status != TW_MT_SLA_ACK)
+		{
+			i2c_stop();
+			i2c.cur_state = I2C_STATE_ERROR;
+			break;
+		}
+		i2c_send_sla_w();
+		break;
+
+	case I2C_STATE_WRITE_BYTE:
+		if(i2c_status != TW_MT_DATA_ACK)
+		{
+			i2c_stop();
+			i2c.cur_state = I2C_STATE_ERROR;
+			break;
+		}
+		i2c_transmit();
+		break;
+	
+	case I2C_STATE_ADDRESS_READ:
+		if(i2c_status != TW_MT_DATA_ACK)
+		{
+			i2c_stop();
+			i2c.cur_state = I2C_STATE_ERROR;
+			break;
+		}
+		i2c_transmit();
+		break;
+	
 	default:
 		break;
 	}
